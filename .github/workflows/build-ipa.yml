@@ -23,36 +23,26 @@ jobs:
       - name: Install Theos
         run: |
           export THEOS=~/.theos
-
-          # Clone Theos with its own submodules (vendor/lib, vendor/include, etc.)
           git clone --recursive https://github.com/theos/theos $THEOS
-
-          # Persist THEOS for all subsequent steps
           echo "THEOS=$THEOS" >> $GITHUB_ENV
 
       # ── 3. Install iOS SDK ───────────────────────────────────────────────────
       - name: Install iOS SDK
         run: |
-          # Use the SDK that ships with Xcode on the runner (no download needed)
           XCODE_SDK=$(xcrun --sdk iphoneos --show-sdk-path)
           SDK_VERSION=$(xcrun --sdk iphoneos --show-sdk-version)
           echo "Using iOS SDK $SDK_VERSION at $XCODE_SDK"
-
-          # Symlink it into the Theos SDK directory so Theos can find it
           mkdir -p $THEOS/sdks
           ln -sf "$XCODE_SDK" "$THEOS/sdks/iPhoneOS${SDK_VERSION}.sdk"
-
           echo "SDK_VERSION=$SDK_VERSION" >> $GITHUB_ENV
 
       # ── 4. Install ldid (required by Theos for fake-signing) ─────────────────
       - name: Install ldid
-        run: |
-          brew install ldid
+        run: brew install ldid
 
-      # ── 5. Build with Theos ─────────────────────────────────────────────────
+      # ── 5. Build with Theos ──────────────────────────────────────────────────
       - name: Build package
         run: |
-          # FINALPACKAGE=1 produces a release .deb (strips debug symbols, etc.)
           make package \
             THEOS=$THEOS \
             FINALPACKAGE=1 \
@@ -60,67 +50,21 @@ jobs:
             TARGET="iphone:clang:${{ env.SDK_VERSION }}:15.0" \
             2>&1
 
-      # ── 6. Convert .deb → .ipa ───────────────────────────────────────────────
-      - name: Convert .deb to unsigned .ipa
+      # ── 6. Locate the .ipa produced by Theos ────────────────────────────────
+      - name: Locate IPA
         run: |
           set -e
+          echo "Contents of packages/:"
+          ls -la packages/ || true
 
-          # Find the .deb produced by Theos
-          DEB_PATH=$(find packages -name "*.deb" | head -1)
-          if [ -z "$DEB_PATH" ]; then
-            echo "ERROR: No .deb found in packages/"
-            ls -la packages/ || true
-            exit 1
-          fi
-          echo "Found: $DEB_PATH"
-
-          # Extract .deb (it's an ar archive)
-          WORKDIR=$(mktemp -d)
-          cd "$WORKDIR"
-          ar x "$OLDPWD/$DEB_PATH"
-
-          # data.tar.* contains the app payload
-          DATA_TAR=$(ls data.tar.* 2>/dev/null | head -1)
-          if [ -z "$DATA_TAR" ]; then
-            echo "ERROR: No data.tar.* found inside .deb"
-            ls -la
+          IPA_PATH=$(find packages -name "*.ipa" | head -1)
+          if [ -z "$IPA_PATH" ]; then
+            echo "ERROR: No .ipa found in packages/"
             exit 1
           fi
 
-          tar xf "$DATA_TAR"
-
-          # Find the .app bundle
-          APP_PATH=$(find . -name "*.app" -type d | head -1)
-          if [ -z "$APP_PATH" ]; then
-            echo "ERROR: No .app found in extracted .deb"
-            find . -type d | head -30
-            exit 1
-          fi
-          echo "App bundle: $APP_PATH"
-          APP_NAME=$(basename "$APP_PATH")
-
-          # Build Payload structure required by IPA format
-          IPA_STAGE=$(mktemp -d)
-          mkdir -p "$IPA_STAGE/Payload"
-          cp -r "$APP_PATH" "$IPA_STAGE/Payload/$APP_NAME"
-
-          # Remove code signature so the IPA can be sideloaded / re-signed
-          codesign --remove-signature "$IPA_STAGE/Payload/$APP_NAME" 2>/dev/null || true
-          find "$IPA_STAGE/Payload/$APP_NAME/PlugIns" -name "*.appex" \
-            -exec codesign --remove-signature {} \; 2>/dev/null || true
-
-          # Zip into .ipa
-          cd "$IPA_STAGE"
-          IPA_NAME="${APP_NAME%.app}-unsigned.ipa"
-          zip -r "$IPA_NAME" Payload
-          cp "$IPA_NAME" "$OLDPWD/$IPA_NAME"
-
-          echo "IPA_PATH=$OLDPWD/$IPA_NAME" >> $GITHUB_ENV
-          echo "IPA_NAME=$IPA_NAME"         >> $GITHUB_ENV
-
-          # Cleanup
-          cd /
-          rm -rf "$WORKDIR" "$IPA_STAGE"
+          echo "Found: $IPA_PATH"
+          echo "IPA_PATH=$IPA_PATH" >> $GITHUB_ENV
 
       # ── 7. Upload IPA as artifact ────────────────────────────────────────────
       - name: Upload IPA artifact
