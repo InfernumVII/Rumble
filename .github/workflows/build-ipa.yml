@@ -44,7 +44,12 @@ jobs:
 
           echo "SDK_VERSION=$SDK_VERSION" >> $GITHUB_ENV
 
-      # ── 4. Build with Theos ──────────────────────────────────────────────────
+      # ── 4. Install ldid (required by Theos for fake-signing) ─────────────────
+      - name: Install ldid
+        run: |
+          brew install ldid
+
+      # ── 5. Build with Theos ─────────────────────────────────────────────────
       - name: Build package
         run: |
           # FINALPACKAGE=1 produces a release .deb (strips debug symbols, etc.)
@@ -55,7 +60,7 @@ jobs:
             TARGET="iphone:clang:${{ env.SDK_VERSION }}:15.0" \
             2>&1
 
-      # ── 5. Convert .deb → .ipa ───────────────────────────────────────────────
+      # ── 6. Convert .deb → .ipa ───────────────────────────────────────────────
       - name: Convert .deb to unsigned .ipa
         run: |
           set -e
@@ -117,7 +122,7 @@ jobs:
           cd /
           rm -rf "$WORKDIR" "$IPA_STAGE"
 
-      # ── 6. Upload IPA as artifact ────────────────────────────────────────────
+      # ── 7. Upload IPA as artifact ────────────────────────────────────────────
       - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
@@ -125,7 +130,7 @@ jobs:
           path: ${{ env.IPA_PATH }}
           retention-days: 14
 
-      # ── 7. (Optional) Create GitHub Release on tag push ──────────────────────
+      # ── 8. (Optional) Create GitHub Release on tag push ──────────────────────
       - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
